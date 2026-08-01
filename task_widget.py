@@ -406,7 +406,11 @@ class TaskWidget:
         self.tasks[today].append(new_task)
         self.save_tasks()
         self.task_entry.delete(0, tk.END)
-        self._set_placeholder()
+        # 不在此处插入占位符：焦点仍在输入框，FocusIn 不会再触发，
+        # 直接保持空输入框让用户继续输入；FocusOut 会自动恢复占位符。
+        self._placeholder_active = False
+        self.task_entry.configure(fg=COL_TXT_HI)
+        self.task_entry.focus_set()
         self.refresh_task_list()
     
     def toggle_task(self, index):
