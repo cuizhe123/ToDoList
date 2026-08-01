@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 轻量级任务桌面挂件
-快捷键：Ctrl+Alt+T 呼出/隐藏
+快捷键：Ctrl+Alt+Z 呼出/隐藏
 功能：添加任务、完成任务、未完成任务自动顺延到次日、任务分类标签
 """
 
@@ -238,7 +238,7 @@ class TaskWidget:
         quit_btn.bind('<Enter>', lambda e: quit_btn.configure(bg=COL_DANGER, fg='#ffffff'))
         quit_btn.bind('<Leave>', lambda e: quit_btn.configure(bg=COL_PANEL, fg=COL_TXT_MID))
 
-        # — 最小化（关闭左侧）：hover 亮底亮字，等效隐藏（Ctrl+Alt+T 恢复）
+        # — 最小化（关闭左侧）：hover 亮底亮字，等效隐藏（Ctrl+Alt+Z 恢复）
         min_btn = tk.Button(
             title_frame,
             text="—",
@@ -347,7 +347,7 @@ class TaskWidget:
         tk.Frame(status_bar, bg=COL_BG, height=1).pack(fill='x')
         hint_label = tk.Label(
             status_bar,
-            text="Ctrl+Alt+T 隐藏/显示  ·  右键任务更多操作",
+            text="Ctrl+Alt+Z 隐藏/显示  ·  右键任务更多操作",
             font=FONT_SMALL,
             bg=COL_PANEL,
             fg=COL_TXT_LOW
@@ -943,7 +943,7 @@ class TaskWidget:
             self.root.after(0, self.toggle_window)
         
         try:
-            keyboard.add_hotkey('ctrl+alt+t', hotkey_handler)
+            keyboard.add_hotkey('ctrl+alt+z', hotkey_handler)
         except Exception as e:
             print(f"快捷键注册失败: {e}")
     
