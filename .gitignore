@@ -1,0 +1,11 @@
+# 个人数据（不提交）
+task_widget.json
+
+# 备份与缓存
+__pycache__/
+*.pyc
+*.bak*
+*.bak_*
+
+# 旧截图（docs/ 下已更新版本）
+ui_new.png
