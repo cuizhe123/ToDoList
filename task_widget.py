@@ -426,80 +426,90 @@ class TaskWidget:
             self.refresh_task_list()
     
     def edit_task(self, index):
-        """弹出对话框修改任务内容"""
+        """弹出对话框修改任务内容（多行文本框，自动换行）"""
         today = datetime.now().strftime('%Y-%m-%d')
         if today not in self.tasks or index >= len(self.tasks[today]):
             return
         old_text = self.tasks[today][index]['text']
-        
+
         dlg = tk.Toplevel(self.root)
         dlg.title("修改任务")
         dlg.configure(bg=COL_BG)
-        dlg.resizable(False, False)
+        dlg.resizable(True, True)
         dlg.transient(self.root)
         dlg.grab_set()
-        
+        dlg.minsize(320, 180)
+
         # 居中于主窗口
+        W, H = 340, 220
         dlg.update_idletasks()
-        x = self.root.winfo_rootx() + (self.root.winfo_width() - dlg.winfo_reqwidth()) // 2
-        y = self.root.winfo_rooty() + (self.root.winfo_height() - dlg.winfo_reqheight()) // 2
-        dlg.geometry(f"+{x}+{y}")
-        
-        entry = tk.Entry(
+        x = self.root.winfo_rootx() + (self.root.winfo_width() - W) // 2
+        y = self.root.winfo_rooty() + (self.root.winfo_height() - H) // 2
+        dlg.geometry(f"{W}x{H}+{x}+{y}")
+
+        # 顶部标签
+        tk.Label(
+            dlg, text="修改任务内容", font=FONT_UI_BOLD,
+            bg=COL_BG, fg=COL_TXT_HI, anchor='w'
+        ).pack(fill='x', padx=15, pady=(12, 4))
+
+        # 多行文本框（wrap=word，自动换行，不超出边框）
+        txt = tk.Text(
             dlg,
+            wrap='word',
             font=('Microsoft YaHei UI', 10),
             bg=COL_INPUT,
             fg=COL_TXT_HI,
             insertbackground=COL_TXT_HI,
             relief='flat',
-            width=30
+            bd=0,
+            padx=10,
+            pady=8,
+            height=5,
+            highlightthickness=1,
+            highlightbackground=COL_BORDER,
+            highlightcolor=COL_ACCENT,
         )
-        entry.insert(0, old_text)
-        entry.pack(padx=15, pady=(15, 10), fill='x')
-        entry.focus_set()
-        entry.select_range(0, tk.END)
-        
+        txt.insert('1.0', old_text)
+        txt.pack(padx=15, pady=(0, 4), fill='both', expand=True)
+        txt.focus_set()
+        txt.mark_set('insert', 'end')
+
+        # 提示
+        tk.Label(
+            dlg, text="Ctrl+Enter 保存  ·  Esc 取消",
+            font=FONT_SMALL, bg=COL_BG, fg=COL_TXT_LOW
+        ).pack(anchor='e', padx=15)
+
         def do_save():
-            new_text = entry.get().strip()
+            new_text = txt.get('1.0', 'end').strip()
             if new_text:
                 self.tasks[today][index]['text'] = new_text
                 self.save_tasks()
                 self.refresh_task_list()
             dlg.destroy()
-        
+
         btn_frame = tk.Frame(dlg, bg=COL_BG)
-        btn_frame.pack(pady=(0, 12))
-        save_btn = tk.Button(
-            btn_frame,
-            text="保存修改",
+        btn_frame.pack(pady=(4, 12))
+        tk.Button(
+            btn_frame, text="保存修改",
             font=('Microsoft YaHei UI', 9),
-            bg=COL_ACCENT,
-            fg='#ffffff',
-            activebackground=COL_ACCENT_HV,
-            relief='flat',
-            bd=0,
-            cursor='hand2',
-            command=do_save,
-            width=8
-        )
-        save_btn.pack(side='left', padx=5)
-        cancel_btn = tk.Button(
-            btn_frame,
-            text="取消",
+            bg=COL_ACCENT, fg='#ffffff',
+            activebackground=COL_ACCENT_HV, activeforeground='#ffffff',
+            relief='flat', bd=0, cursor='hand2',
+            command=do_save, width=8
+        ).pack(side='left', padx=5)
+        tk.Button(
+            btn_frame, text="取消",
             font=('Microsoft YaHei UI', 9),
-            bg=COL_PANEL,
-            fg=COL_TXT_MID,
-            activebackground=COL_CARD_HV,
-            relief='flat',
-            bd=0,
-            cursor='hand2',
-            command=dlg.destroy,
-            width=8
-        )
-        cancel_btn.pack(side='left', padx=5)
-        
-        entry.bind('<Return>', lambda e: do_save())
-        entry.bind('<Escape>', lambda e: dlg.destroy())
+            bg=COL_PANEL, fg=COL_TXT_MID,
+            activebackground=COL_CARD_HV, activeforeground=COL_TXT_HI,
+            relief='flat', bd=0, cursor='hand2',
+            command=dlg.destroy, width=8
+        ).pack(side='left', padx=5)
+
+        txt.bind('<Control-Return>', lambda e: do_save())
+        txt.bind('<Escape>', lambda e: dlg.destroy())
     
     def show_category_menu(self, index, widget):
         """点击分类标签弹出选择菜单：长期 / 急 / 不急"""
@@ -776,61 +786,58 @@ class TaskWidget:
             menu.grab_release()
 
     def open_task_detail(self, index):
-        """打开任务二级窗口：完整内容（多行可编辑）+ 分类/完成/保存/删除"""
+        """在主窗口内叠加内联详情面板（不开新窗口）"""
         today = datetime.now().strftime('%Y-%m-%d')
         if today not in self.tasks or index >= len(self.tasks[today]):
             return
         task = self.tasks[today][index]
 
-        dlg = tk.Toplevel(self.root)
-        dlg.title("任务详情")
-        dlg.configure(bg=COL_BG)
-        dlg.geometry("560x340")
-        dlg.overrideredirect(True)
-        dlg.transient(self.root)
-        dlg.after(300, lambda: self._apply_round_corner(dlg))
-        # 居中于主窗口
-        dlg.update_idletasks()
-        x = self.root.winfo_rootx() + (self.root.winfo_width() - 560) // 2
-        y = self.root.winfo_rooty() + (self.root.winfo_height() - 340) // 2
-        dlg.geometry(f"+{x}+{y}")
+        # 如果已有详情面板则先销毁（防止重复打开）
+        if hasattr(self, '_detail_panel') and self._detail_panel is not None:
+            try:
+                self._detail_panel.destroy()
+            except Exception:
+                pass
+            self._detail_panel = None
+
+        # 内联面板：place 覆盖整个主窗口，z 轴最顶层
+        panel = tk.Frame(self.root, bg=COL_BG, relief='flat', bd=0)
+        panel.place(x=0, y=0, relwidth=1, relheight=1)
+        panel.lift()
+        self._detail_panel = panel
+
+        def close_panel():
+            panel.place_forget()
+            panel.destroy()
+            self._detail_panel = None
 
         # 顶部强调线
-        tk.Frame(dlg, bg=COL_ACCENT, height=2).pack(fill='x')
+        tk.Frame(panel, bg=COL_ACCENT, height=2).pack(fill='x')
 
-        # 自绘标题栏（可拖动）
-        bar = tk.Frame(dlg, bg=COL_PANEL, height=40)
+        # 标题栏
+        bar = tk.Frame(panel, bg=COL_PANEL, height=40)
         bar.pack(fill='x')
         bar.pack_propagate(False)
         title_lbl = tk.Label(bar, text="任务详情", font=FONT_UI_BOLD, bg=COL_PANEL, fg=COL_TXT_HI)
         title_lbl.pack(side='left', padx=(SP_LG, 0), pady=8)
         close_btn = tk.Button(
             bar, text="✕", font=FONT_SYMBOL_SM, bg=COL_PANEL, fg=COL_TXT_MID,
-            activebackground=COL_PANEL, activeforeground=COL_DANGER, relief='flat', bd=0,
-            cursor='hand2', command=dlg.destroy, width=3
+            activebackground=COL_PANEL, activeforeground=COL_DANGER,
+            relief='flat', bd=0, cursor='hand2', command=close_panel, width=3
         )
         close_btn.pack(side='right', padx=(0, SP_SM), pady=4)
         close_btn.bind('<Enter>', lambda e: close_btn.configure(fg=COL_DANGER))
         close_btn.bind('<Leave>', lambda e: close_btn.configure(fg=COL_TXT_MID))
 
-        drag = {'dx': 0, 'dy': 0}
-        def sd(e):
-            drag['dx'], drag['dy'] = e.x_root - dlg.winfo_x(), e.y_root - dlg.winfo_y()
-        def dd(e):
-            dlg.geometry(f"+{e.x_root - drag['dx']}+{e.y_root - drag['dy']}")
-        for w in (bar, title_lbl):
-            w.bind('<Button-1>', sd)
-            w.bind('<B1-Motion>', dd)
-
-        # 状态行：分类胶囊（点击切换）+ 完成切换
-        row = tk.Frame(dlg, bg=COL_BG)
+        # 状态行：分类胶囊 + 完成切换
+        row = tk.Frame(panel, bg=COL_BG)
         row.pack(fill='x', padx=SP_LG, pady=(SP_MD, SP_SM))
         cat = task.get('category', None)
         cat_text, cat_fg, cat_bg = CATEGORY_CONFIG.get(cat, CATEGORY_CONFIG[None])
         cat_btn = tk.Button(
             row, text=cat_text, font=FONT_SMALL, bg=cat_bg, fg=cat_fg,
-            activebackground=cat_bg, activeforeground=cat_fg, relief='flat', bd=0,
-            cursor='hand2', padx=8, pady=3
+            activebackground=cat_bg, activeforeground=cat_fg,
+            relief='flat', bd=0, cursor='hand2', padx=8, pady=3
         )
         cat_btn.pack(side='left')
         completed = task.get('completed', False)
@@ -844,9 +851,10 @@ class TaskWidget:
 
         def do_toggle():
             self.toggle_task(index)
-            dlg.destroy()
+            close_panel()
         toggle_btn = tk.Button(
-            row, text="✓ 标记完成" if not completed else "↺ 恢复未完成",
+            row,
+            text="✓ 标记完成" if not completed else "↺ 恢复未完成",
             font=FONT_SMALL, bg=COL_PANEL,
             fg=COL_SUCCESS if not completed else COL_TXT_MID,
             activebackground=COL_CARD_HV,
@@ -856,19 +864,19 @@ class TaskWidget:
         )
         toggle_btn.pack(side='right')
 
+        # 按钮行先 pack（固定底部），text 再 pack 填充剩余空间
+        btns = tk.Frame(panel, bg=COL_BG)
+        btns.pack(fill='x', padx=SP_LG, pady=(0, SP_MD), side='bottom')
+
         # 完整内容（多行可编辑，wrap 自动换行）
         text = tk.Text(
-            dlg, wrap='word', font=('Microsoft YaHei UI', 11),
+            panel, wrap='word', font=('Microsoft YaHei UI', 11),
             bg=COL_INPUT, fg=COL_TXT_HI, insertbackground=COL_TXT_HI,
-            relief='flat', bd=0, padx=12, pady=10, height=6,
+            relief='flat', bd=0, padx=12, pady=10,
             highlightthickness=1, highlightbackground=COL_BORDER
         )
         text.insert('1.0', task['text'])
         text.pack(fill='both', expand=True, padx=SP_LG, pady=(0, SP_SM))
-
-        # 按钮行：保存修改 / 删除任务 / 关闭
-        btns = tk.Frame(dlg, bg=COL_BG)
-        btns.pack(fill='x', padx=SP_LG, pady=(0, SP_MD))
 
         def do_save():
             new_text = text.get('1.0', 'end').strip()
@@ -876,7 +884,8 @@ class TaskWidget:
                 self.tasks[today][index]['text'] = new_text
                 self.save_tasks()
                 self.refresh_task_list()
-            dlg.destroy()
+            close_panel()
+
         save_btn = tk.Button(
             btns, text="保存修改", font=('Microsoft YaHei UI', 9),
             bg=COL_ACCENT, fg='#ffffff', activebackground=COL_ACCENT_HV,
@@ -886,9 +895,9 @@ class TaskWidget:
         save_btn.pack(side='left', padx=(0, 6))
 
         def do_delete():
-            if messagebox.askyesno("删除任务", "确定删除该任务吗？", parent=dlg):
+            if messagebox.askyesno("删除任务", "确定删除该任务吗？", parent=self.root):
                 self.delete_task(index)
-                dlg.destroy()
+                close_panel()
         del_btn = tk.Button(
             btns, text="删除任务", font=('Microsoft YaHei UI', 9),
             bg=COL_PANEL, fg=COL_DANGER, activebackground=COL_CARD_HV,
@@ -896,16 +905,17 @@ class TaskWidget:
             command=do_delete, width=8
         )
         del_btn.pack(side='left')
+
         close_btn2 = tk.Button(
-            btns, text="关闭", font=('Microsoft YaHei UI', 9),
-            bg=COL_PANEL, fg=COL_TXT_MID, activebackground=COL_CARD_HV,
-            activeforeground=COL_TXT_HI, relief='flat', bd=0, cursor='hand2',
-            command=dlg.destroy, width=8
+            btns, text="✓ 完成", font=('Microsoft YaHei UI', 9, 'bold'),
+            bg=COL_SUCCESS, fg='#ffffff', activebackground='#27ae60',
+            activeforeground='#ffffff', relief='flat', bd=0, cursor='hand2',
+            command=close_panel, width=9, pady=3
         )
         close_btn2.pack(side='right')
 
         text.bind('<Control-Return>', lambda e: do_save())
-        text.bind('<Escape>', lambda e: dlg.destroy())
+        text.bind('<Escape>', lambda e: close_panel())
         text.focus_set()
 
     def toggle_window(self):
