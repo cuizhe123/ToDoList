@@ -114,7 +114,24 @@ class TaskWidget:
         self.root = tk.Tk()
         self.root.title("今日list")
         self.root.geometry("640x560")
+        # 定位到屏幕右上角，距边框留 16px 间距
+        self.root.update_idletasks()
+        sw = self.root.winfo_screenwidth()
+        margin = 16
+        win_w = 640
+        win_h = 560
+        pos_x = sw - win_w - margin
+        pos_y = margin
+        self.root.geometry(f"{win_w}x{win_h}+{pos_x}+{pos_y}")
         self.root.configure(bg=COL_BG)
+
+        # 设置窗口图标（任务栏 / Alt+Tab / 标题），缺失时静默降级
+        try:
+            icon_path = Path(__file__).resolve().parent / 'icon.ico'
+            if icon_path.exists():
+                self.root.iconbitmap(str(icon_path))
+        except Exception:
+            pass
 
         # 无边框圆角挂件：移除系统标题栏 + DWM 系统圆角（延迟到窗口映射后设置，Win11 22000+）
         self.root.overrideredirect(True)
@@ -163,24 +180,31 @@ class TaskWidget:
         return {}
     
     def carryover_tasks(self, tasks):
-        """将过去日期的未完成任务顺延到今天"""
+        """将过去日期的任务顺延到今天：
+        - 未完成任务：顺延，保持未完成
+        - 长期任务：即使已勾选完成，次日也重置为未完成继续顺延（习惯打卡）
+        - 其他已完成任务：结束，不再顺延
+        """
         today = datetime.now().strftime('%Y-%m-%d')
         today_tasks = tasks.get(today, [])
-        
-        # 收集所有过去日期的未完成任务
+
+        # 收集所有过去日期的任务
         for date_str in list(tasks.keys()):
             if date_str < today:
                 for task in tasks[date_str]:
-                    if not task['completed']:
+                    if not task['completed'] or task.get('category') == '长期':
+                        # 长期任务已完成：新的一天重置为未完成，重新打卡
+                        if task['completed'] and task.get('category') == '长期':
+                            task['completed'] = False
                         # 标记为顺延任务
                         task['carried_from'] = date_str
                         today_tasks.append(task)
                 # 删除过去的日期
                 del tasks[date_str]
-        
+
         if today_tasks:
             tasks[today] = today_tasks
-        
+
         return tasks
     
     def save_tasks(self):
