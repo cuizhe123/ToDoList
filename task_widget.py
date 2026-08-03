@@ -214,12 +214,21 @@ class TaskWidget:
         )
         self.count_label.pack(side='right', padx=(0, SP_SM), pady=8)
 
+        # 窗口控制按钮：— 最小化（隐藏到后台） / ✕ 退出
+        win_ctrl = tk.Frame(title_bar, bg=COL_PANEL)
+        win_ctrl.pack(side='right', padx=(0, SP_XS), pady=6)
+        quit_btn = tk.Button(
+            win_ctrl, text="✕", font=FONT_SYMBOL_SM, bg=COL_PANEL, fg=COL_TXT_MID,
+            activebackground='#3a1f1f', activeforeground='#e06c66',
+            relief='flat', bd=0, cursor='hand2', command=self.quit_app, width=2
+        )
+        quit_btn.pack(side='right')
         hide_btn = tk.Button(
-            title_bar, text="—", font=FONT_SYMBOL_SM, bg=COL_PANEL, fg=COL_TXT_MID,
+            win_ctrl, text="—", font=FONT_SYMBOL_SM, bg=COL_PANEL, fg=COL_TXT_MID,
             activebackground=COL_PANEL, activeforeground=COL_TXT_HI,
             relief='flat', bd=0, cursor='hand2', command=self.hide_window, width=2
         )
-        hide_btn.pack(side='right', padx=(0, SP_XS), pady=6)
+        hide_btn.pack(side='right')
 
         # 标题栏拖拽
         for w in [title_bar, self.title_lbl]:
@@ -961,6 +970,9 @@ class TaskWidget:
         menu.add_separator()
         menu.add_command(label="✕ 删除", foreground=COL_DANGER,
                          command=lambda: self.delete_task(index))
+        menu.add_separator()
+        menu.add_command(label="退出应用", foreground=COL_TXT_LOW,
+                         command=self.quit_app)
 
         try:
             menu.tk_popup(event.x_root, event.y_root)
@@ -982,6 +994,17 @@ class TaskWidget:
 
     def hide_window(self):
         self.root.withdraw()
+
+    def quit_app(self):
+        """真正退出应用：清理全局热键后销毁窗口"""
+        try:
+            keyboard.unhook_all()
+        except Exception:
+            pass
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
 
     def show_window(self):
         self.root.deiconify()
