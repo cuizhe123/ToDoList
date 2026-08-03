@@ -37,7 +37,7 @@ COL_ACCENT_HV = '#3cbcb3'   # 强调色悬停
 COL_DANGER    = '#e06c66'   # 危险 / 删除
 COL_SUCCESS   = '#4fbf8f'   # 完成态 / 进度满
 COL_DONE_CARD = '#181c23'   # 完成任务卡片（更暗弱化）
-COL_PROG_BG   = '#222936'   # 进度条轨道
+COL_PROG_BG   = '#222936'   # 进度条轨道（已停用，保留兼容）
 COL_SCROLL_FG = '#3a4453'   # 滚动条滑块
 COL_SCROLL_BG = '#20262f'   # 滚动条轨道
 
@@ -129,7 +129,7 @@ class TaskWidget:
             pass
 
         # 窗口默认位置：右上角
-        W, H = 380, 620
+        W, H = 640, 560
         sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
         self._win_x, self._win_y = sw - W - 24, 64
         self.root.geometry(f"{W}x{H}+{self._win_x}+{self._win_y}")
@@ -225,20 +225,6 @@ class TaskWidget:
         for w in [title_bar, self.title_lbl]:
             w.bind('<Button-1>', self._start_drag)
             w.bind('<B1-Motion>', self._on_drag)
-
-        # ── 进度条区 ──
-        self.progress_frame = tk.Frame(self.root, bg=COL_BG)
-        self.progress_frame.pack(fill='x', padx=SP_LG, pady=(SP_MD, SP_XS))
-        self.progress_canvas = tk.Canvas(
-            self.progress_frame, height=10, bg=COL_BG, highlightthickness=0, bd=0
-        )
-        self.progress_canvas.pack(fill='x')
-        self.progress_label = tk.Label(
-            self.progress_frame, text="", font=FONT_SMALL,
-            bg=COL_BG, fg=COL_TXT_MID
-        )
-        self.progress_label.pack(anchor='e', pady=(2, 0))
-        self._prog_anim = None
 
         # ── 输入区 ──
         input_frame = tk.Frame(self.root, bg=COL_BG)
@@ -587,17 +573,10 @@ class TaskWidget:
         else:
             shown = [t for t in tasks if t.get('category') == f]
 
-        # 统计与进度
+        # 统计
         done = sum(1 for t in tasks if t.get('completed'))
         total = len(tasks)
         self.count_label.config(text=f"{total} 项 · 完成 {done}" if total else "0 项")
-        if total:
-            pct = int(done * 100 / total)
-            self.progress_label.config(text=f"今日完成 {done}/{total} · {pct}%")
-            self._animate_progress(done / total)
-        else:
-            self.progress_label.config(text="添加第一个任务吧")
-            self._animate_progress(0)
 
         # 过滤按钮高亮
         for key, b in self._filter_btns.items():
@@ -637,7 +616,7 @@ class TaskWidget:
             ).pack(side='left', padx=(2, 0))
             if not self._done_folded:
                 for i in done_indices:
-                    if f == 'all':
+                    if f == 'all' or tasks[i].get('category') == f:
                         self._render_task(i, tasks[i], done=True)
         elif f == 'done':
             for i in done_indices:
@@ -708,7 +687,7 @@ class TaskWidget:
         text_style = 'overstrike' if completed else 'normal'
         task_label = tk.Label(
             text_block, text=task['text'], font=('Microsoft YaHei UI', 10, text_style),
-            bg=card_bg, fg=text_color, anchor='w', justify='left', wraplength=170
+            bg=card_bg, fg=text_color, anchor='w', justify='left', wraplength=420
         )
         task_label.pack(fill='x')
 
@@ -945,44 +924,6 @@ class TaskWidget:
             command=close_panel, width=9, pady=3
         )
         close_btn2.pack(side='right')
-
-    def _animate_progress(self, ratio, duration=400):
-        """Canvas 进度条动画填充"""
-        if self._prog_anim:
-            self.root.after_cancel(self._prog_anim)
-            self._prog_anim = None
-        c = self.progress_canvas
-        c.delete('all')
-        w = c.winfo_width()
-        if w < 10:
-            w = 340
-        h = 10
-        r = 5
-        # 轨道
-        c.create_oval(0, 0, h, h, fill=COL_PROG_BG, outline='')
-        c.create_rectangle(h // 2, 0, w - h // 2, h, fill=COL_PROG_BG, outline='')
-        c.create_oval(w - h, 0, w, h, fill=COL_PROG_BG, outline='')
-        target = max(0.0, min(1.0, ratio))
-        start_time = datetime.now()
-
-        def step():
-            elapsed = (datetime.now() - start_time).total_seconds() * 1000
-            frac = min(1.0, elapsed / duration)
-            eased = 1 - (1 - frac) ** 3  # ease-out
-            cur = target * eased
-            fw = int((w - h) * cur)
-            if fw <= 0:
-                if cur < 0.999:
-                    self._prog_anim = self.root.after(16, step)
-                return
-            color = COL_ACCENT if cur < 1 else COL_SUCCESS
-            c.create_oval(0, 0, h, h, fill=color, outline='')
-            c.create_rectangle(h // 2, 0, h // 2 + fw, h, fill=color, outline='')
-            c.create_oval(h // 2 + fw - h, 0, h // 2 + fw, h, fill=color, outline='')
-            if frac < 1:
-                self._prog_anim = self.root.after(16, step)
-
-        step()
 
     def show_task_menu(self, index, event):
         """任务右键菜单：完成/分类/编辑/删除"""
