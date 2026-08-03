@@ -127,7 +127,7 @@ class TaskWidget:
 
         # 设置窗口图标（任务栏 / Alt+Tab / 标题），缺失时静默降级
         try:
-            icon_path = Path(__file__).resolve().parent / 'icon.ico'
+            icon_path = Path(__file__).resolve().parent / 'assets' / 'icon.ico'
             if icon_path.exists():
                 self.root.iconbitmap(str(icon_path))
         except Exception:

@@ -22,19 +22,22 @@
 | 特性 | 说明 |
 |---|---|
 | 🎨 极简深色界面 | 暖近黑底 + 单强调色，无任何视觉噪音 |
+| 🖼️ 应用图标 | 自带品牌图标（任务栏 / Alt+Tab / 标题栏），非默认 Python 图标 |
+| 📌 右上角定位 | 启动自动吸附屏幕右上角，留 16px 边距，不挡主工作区 |
 | ⌨️ 全局快捷键 | `Ctrl+Alt+Z` 随时呼出 / 隐藏窗口 |
 | 🏷️ 分类管理 | 「急 / 长期 / 不急」胶囊标签 + 分类色条，一目了然 |
 | 📄 任务详情二级窗口 | 双击任务行，查看全文 + 编辑 + 完成 + 删除 |
 | 🔄 自动顺延 | 未完成任务次日自动带入（无冗余标志打扰） |
+| 🔁 长期任务打卡 | 「长期」任务即使勾选完成，次日自动重置为未完成，继续顺延打卡 |
 | 💾 本地数据 | JSON 文件存储，数据完全自持，不上传任何云端 |
 | 🪟 无边框 + 系统圆角 | 原生 DWM 圆角（Windows 11），自绘标题栏 + 最小化 / 关闭按钮 |
 | 📊 今日统计 | 标题栏实时显示「N 项 · 待办 M」与完成计数 |
 
 ## 📸 界面预览
 
-| 主界面 | 任务详情（二级窗口） |
+| 主界面 | 双击任务（详情窗口） |
 |---|---|
-| ![主界面](docs/main.png) | ![详情](docs/detail.png) |
+| ![主界面](docs/main_preview.png) | ![详情](docs/after_dblclick.png) |
 
 ## 🚀 快速开始
 
@@ -52,6 +55,11 @@ python task_widget.py
 # 或直接双击 start.bat
 ```
 
+### 重新生成图标（可选）
+```bash
+python scripts/icon_gen.py   # 输出到 assets/icon.ico 与 icon_preview.png
+```
+
 ## 📖 使用说明
 
 | 操作 | 方式 |
@@ -60,6 +68,7 @@ python task_widget.py
 | 标记完成 | 点击任务左侧 ○ 圆圈 |
 | 查看 / 编辑全文 | **双击任务行**（长文本不再被截断） |
 | 分类 / 更多操作 | 任务行**右键菜单**（完成 / 恢复 / 编辑 / 分类 / 删除） |
+| 长期任务 | 右键设为「长期」分类后，勾选完成次日会自动重置为未完成，用于习惯打卡 |
 | 隐藏 / 显示 | `Ctrl+Alt+Z` 全局快捷键 |
 | 最小化 | 标题栏 `—`（等同隐藏，快捷键可恢复） |
 | 退出 | 标题栏 `✕` |
@@ -68,22 +77,38 @@ python task_widget.py
 
 - 任务数据保存在程序同目录：`task_widget.json`
 - 纯本地 JSON，无任何云端同步；删除该文件即可清空所有数据
+- 该文件已被 `.gitignore` 排除，不会提交到仓库
 
 ## 🛠️ 技术栈
 
 - **Python 3** + **Tkinter**（标准库 GUI，零额外界面依赖）
 - **keyboard** —— 全局快捷键监听
 - **Win32 API**（ctypes）—— 无边框窗口、DWM 系统圆角、单实例端口守护
+- **Pillow** —— 仅用于图标生成脚本（`scripts/icon_gen.py`）
 
 ## 📦 项目结构
 
 ```
 task_widget/
-├── task_widget.py      # 主程序（单文件实现）
-├── requirements.txt    # 依赖清单
-├── start.bat           # Windows 一键启动
-├── docs/               # README 截图
-└── task_widget.json    # 本地数据（自动生成，不入库）
+├── task_widget.py        # 主程序（单文件实现）
+├── requirements.txt      # 运行依赖（keyboard）
+├── start.bat             # Windows 一键启动
+├── README.md
+├── .gitignore
+├── assets/               # 图标资源
+│   ├── icon.ico          # 应用图标（多尺寸）
+│   └── icon_preview.png  # 图标预览大图
+├── scripts/              # 辅助 / 开发脚本
+│   ├── icon_gen.py       # 图标生成器（可重复运行）
+│   └── snap_detail.py    # UI 自动化调试脚本
+├── docs/                 # README 截图
+│   ├── main_preview.png
+│   ├── after_click1.png
+│   ├── after_dblclick.png
+│   ├── main.png          # 早期版本截图
+│   └── detail.png        # 早期版本截图
+├── backup/               # 历史备份（不入库）
+└── task_widget.json      # 本地数据（自动生成，不入库）
 ```
 
 ## 📄 License

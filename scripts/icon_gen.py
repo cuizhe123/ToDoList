@@ -4,7 +4,9 @@
 今日list 图标生成器（可重复运行）
 设计语言：暖近黑圆角瓷砖 + 三条列表线（左）+ 青绿对勾圆（右）
 配色取自 task_widget.py 设计令牌
+输出：assets/icon.ico 与 assets/icon_preview.png（相对本文件仓库根）
 """
+from pathlib import Path
 from PIL import Image, ImageDraw
 
 S = 1024  # 超采样主画布
@@ -61,12 +63,14 @@ def build_master():
 
 def main():
     master = build_master()
+    out_dir = Path(__file__).resolve().parent.parent / 'assets'
+    out_dir.mkdir(parents=True, exist_ok=True)
     # 预览大图
-    master.resize((512, 512), Image.LANCZOS).save(r'D:\task_widget\icon_preview.png')
+    master.resize((512, 512), Image.LANCZOS).save(out_dir / 'icon_preview.png')
     # 多尺寸 .ico（PIL 直接由主图缩略生成全部尺寸）
     sizes = [(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
     icon256 = master.resize((256, 256), Image.LANCZOS)
-    icon256.save(r'D:\task_widget\icon.ico', format='ICO', sizes=sizes)
+    icon256.save(out_dir / 'icon.ico', format='ICO', sizes=sizes)
     print('icon.ico 已生成，包含尺寸:', sizes)
 
 if __name__ == '__main__':

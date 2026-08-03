@@ -6,6 +6,7 @@ __pycache__/
 *.pyc
 *.bak*
 *.bak_*
+backup/
 
 # 旧截图（docs/ 下已更新版本）
 ui_new.png
