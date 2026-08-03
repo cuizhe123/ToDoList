@@ -147,10 +147,17 @@ class TaskWidget:
         self._done_folded = False   # 已完成分区是否折叠
         self._undo_stack = []       # 撤销删除栈
         self._default_cat = None    # 输入框预设分类（快捷添加）
+        # 增量渲染状态：卡片widget与数据顺序保持一致（操作只改单张卡，不整表重建）
+        self._cards = []            # 每项: {'f': frame, 'data': task, 'label':..., 'cat_btn':...}
+        self._done_header = None    # 已完成折叠header（常驻）
+        self._done_fold_btn = None
+        self._done_count_lbl = None
+        self._empty_frame = None    # 空状态frame（常驻）
+        self._empty_msg_lbl = None
 
         # UI
         self._build_ui()
-        self._refresh_task_list()
+        self._build_all_cards()
         self.register_hotkey()
 
         # 圆角（Win11 可选）
@@ -376,7 +383,8 @@ class TaskWidget:
 
     def set_filter(self, key):
         self._filter = key
-        self._refresh_task_list()
+        self._apply_visibility()
+        self._refresh_counters()
 
     def _toggle_default_cat(self, cat):
         """预设快捷分类：再次点击取消"""
@@ -412,18 +420,31 @@ class TaskWidget:
         self._placeholder_active = False
         self.task_entry.configure(fg=COL_TXT_HI)
         self.task_entry.focus_set()
-        # 新任务自动滚到底部
-        self._refresh_task_list()
+        # 增量：只追加新卡片，不重建整个列表
+        self._cards.append(self._render_task(len(self.tasks[today]) - 1, new_task))
+        self._apply_visibility()
+        self._refresh_counters()
         self.canvas.yview_moveto(1.0)
 
     def toggle_task(self, index):
+        """勾选/取消勾选（零重建：只改样式+按过滤重排，不销毁任何widget）"""
         today = datetime.now().strftime('%Y-%m-%d')
         if today in self.tasks and index < len(self.tasks[today]):
             self.tasks[today][index]['completed'] = not self.tasks[today][index]['completed']
             self.save_tasks()
-            self._refresh_task_list()
+            self._update_card_style(self._cards[index])
+            self._apply_visibility()
+            self._refresh_counters()
+
+    def toggle_card(self, card):
+        """卡片引用版勾选（动态查index，删除/移动后依然准确）"""
+        try:
+            self.toggle_task(self._cards.index(card))
+        except ValueError:
+            pass
 
     def delete_task(self, index):
+        """删除任务（增量：只销毁该卡片，后续卡片pack自动上移不重建）"""
         today = datetime.now().strftime('%Y-%m-%d')
         if today in self.tasks and index < len(self.tasks[today]):
             removed = self.tasks[today].pop(index)
@@ -431,8 +452,22 @@ class TaskWidget:
             if len(self._undo_stack) > 10:
                 self._undo_stack.pop(0)
             self.save_tasks()
-            self._refresh_task_list()
+            if 0 <= index < len(self._cards):
+                try:
+                    self._cards[index]['f'].destroy()
+                except Exception:
+                    pass
+                self._cards.pop(index)
+            self._apply_visibility()
+            self._refresh_counters()
             self._flash_undo()
+
+    def delete_card(self, card):
+        """卡片引用版删除"""
+        try:
+            self.delete_task(self._cards.index(card))
+        except ValueError:
+            pass
 
     def undo_delete(self):
         if not self._undo_stack:
@@ -442,7 +477,7 @@ class TaskWidget:
             self.tasks[today] = []
         self.tasks[today].insert(min(index, len(self.tasks[today])), removed)
         self.save_tasks()
-        self._refresh_task_list()
+        self._build_all_cards()  # 低频操作：全量重建最稳妥
 
     def _flash_undo(self):
         """短暂高亮撤销按钮提示"""
@@ -451,7 +486,7 @@ class TaskWidget:
             bg=COL_CARD, fg=COL_TXT_LOW))
 
     def move_task(self, index, delta):
-        """上移/下移任务（仅未完成可排序）"""
+        """上移/下移任务（增量：数据+卡片顺序同步交换，只重排位置不重建）"""
         today = datetime.now().strftime('%Y-%m-%d')
         if today not in self.tasks or index < 0 or index >= len(self.tasks[today]):
             return
@@ -462,8 +497,17 @@ class TaskWidget:
         if tasks[index].get('completed') or tasks[new_index].get('completed'):
             return  # 不跨完成区移动
         tasks[index], tasks[new_index] = tasks[new_index], tasks[index]
+        if index < len(self._cards) and new_index < len(self._cards):
+            self._cards[index], self._cards[new_index] = self._cards[new_index], self._cards[index]
         self.save_tasks()
-        self._refresh_task_list()
+        self._apply_visibility()
+
+    def move_card(self, card, delta):
+        """卡片引用版上移/下移"""
+        try:
+            self.move_task(self._cards.index(card), delta)
+        except ValueError:
+            pass
 
     def edit_task(self, index):
         """弹出对话框修改任务内容（多行文本框，自动换行）"""
@@ -512,7 +556,7 @@ class TaskWidget:
             if new_text:
                 self.tasks[today][index]['text'] = new_text
                 self.save_tasks()
-                self._refresh_task_list()
+                self._rebuild_one(index)
             dlg.destroy()
 
         btn_frame = tk.Frame(dlg, bg=COL_BG)
@@ -561,96 +605,46 @@ class TaskWidget:
             return
         self.tasks[today][index]['category'] = category
         self.save_tasks()
-        self._refresh_task_list()
+        self._rebuild_one(index)
+        self._refresh_counters()
 
     # ---------- 渲染 ----------
 
-    def _refresh_task_list(self):
-        """刷新任务列表（双缓冲：隐藏旧内容→重建→恢复显示，避免点击闪烁）"""
+    def _build_all_cards(self):
+        """全量重建（仅启动/跨日/撤销/恢复窗口时调用）。日常操作全部走增量路径。"""
         # 记录滚动位置
         try:
             self._yview_frac = self.canvas.yview()[0]
         except Exception:
             self._yview_frac = 0.0
-        # 隐藏旧内容（清空→重建过程用户不可见）
+        # 隐藏旧内容（重建过程用户不可见）
         try:
             self.canvas.itemconfig(self._canvas_window, state='hidden')
         except Exception:
             pass
 
+        # 清空卡片与容器（常驻header/空状态由_apply_visibility管理）
+        self._cards = []
         for widget in self.task_container.winfo_children():
             widget.destroy()
+        self._done_header = None
+        self._done_fold_btn = None
+        self._done_count_lbl = None
+        self._empty_frame = None
+        self._empty_msg_lbl = None
 
         today = datetime.now().strftime('%Y-%m-%d')
         tasks = self.tasks.get(today, [])
+        for i, t in enumerate(tasks):
+            self._cards.append(self._render_task(i, t))
 
-        # 应用过滤
-        f = self._filter
-        if f == 'done':
-            shown = [t for t in tasks if t.get('completed')]
-        elif f == 'all':
-            shown = tasks
-        else:
-            shown = [t for t in tasks if t.get('category') == f]
-
-        # 统计
-        done = sum(1 for t in tasks if t.get('completed'))
-        total = len(tasks)
-        self.count_label.config(text=f"{total} 项 · 完成 {done}" if total else "0 项")
-
-        # 过滤按钮高亮
-        for key, b in self._filter_btns.items():
-            if key == f:
-                b.configure(bg=COL_ACCENT, fg='#14171c')
-            else:
-                b.configure(bg=COL_CARD, fg=COL_TXT_MID)
-
-        # 空状态
-        if not tasks:
-            self._render_empty()
-            self._restore_after_refresh()
-            return
-
-        # 待办区（保持原有 index 用于操作）
-        pending_indices = [i for i, t in enumerate(tasks) if not t.get('completed')]
-        if f != 'done' and pending_indices:
-            for i in pending_indices:
-                if f == 'all' or tasks[i].get('category') == f:
-                    self._render_task(i, tasks[i])
-
-        # 已完成区（可折叠）
-        done_indices = [i for i, t in enumerate(tasks) if t.get('completed')]
-        if done_indices and f != 'done':
-            header = tk.Frame(self.task_container, bg=COL_BG)
-            header.pack(fill='x', pady=(SP_MD, SP_XS))
-            fold_btn = tk.Button(
-                header, text="▾ 已完成" if not self._done_folded else "▸ 已完成",
-                font=FONT_SMALL, bg=COL_BG, fg=COL_TXT_LOW,
-                activebackground=COL_BG, activeforeground=COL_TXT_MID,
-                relief='flat', bd=0, cursor='hand2', takefocus=0,
-                command=self._toggle_done_fold, anchor='w', padx=0
-            )
-            fold_btn.pack(side='left')
-            tk.Label(
-                header, text=f"({len(done_indices)})", font=FONT_SMALL,
-                bg=COL_BG, fg=COL_TXT_LOW
-            ).pack(side='left', padx=(2, 0))
-            if not self._done_folded:
-                for i in done_indices:
-                    if f == 'all' or tasks[i].get('category') == f:
-                        self._render_task(i, tasks[i], done=True)
-        elif f == 'done':
-            for i in done_indices:
-                self._render_task(i, tasks[i], done=True)
-
-        if f == 'done' and not done_indices:
-            self._render_empty("暂无已完成任务")
-
-        # 重建完成：恢复显示 + 更新滚动区 + 保持滚动位置
+        self._ensure_empty_frame()
+        self._apply_visibility()
+        self._refresh_counters()
         self._restore_after_refresh()
 
     def _restore_after_refresh(self):
-        """刷新完成后恢复显示与滚动位置（双缓冲收尾）"""
+        """全量重建后恢复显示与滚动位置（双缓冲收尾）"""
         try:
             self.canvas.itemconfig(self._canvas_window, state='normal')
         except Exception:
@@ -666,28 +660,178 @@ class TaskWidget:
             except Exception:
                 pass
 
-    def _toggle_done_fold(self):
-        self._done_folded = not self._done_folded
-        self._refresh_task_list()
-
-    def _render_empty(self, msg="暂无任务"):
-        frame = tk.Frame(self.task_container, bg=COL_BG)
-        frame.pack(fill='both', pady=46)
+    def _ensure_empty_frame(self):
+        """创建常驻空状态frame（仅首次调用时创建一次，之后只切换显示）"""
+        if self._empty_frame is not None:
+            return
+        self._empty_frame = tk.Frame(self.task_container, bg=COL_BG)
         tk.Label(
-            frame, text="🗒", font=('Segoe UI Emoji', 26),
+            self._empty_frame, text="🗒", font=('Segoe UI Emoji', 26),
             bg=COL_BG, fg=COL_TXT_LOW
         ).pack()
-        tk.Label(
-            frame, text=msg, font=FONT_UI_BOLD,
+        self._empty_msg_lbl = tk.Label(
+            self._empty_frame, text="", font=FONT_UI_BOLD,
             bg=COL_BG, fg=COL_TXT_MID
-        ).pack(pady=(8, 0))
+        )
+        self._empty_msg_lbl.pack(pady=(8, 0))
         tk.Label(
-            frame, text="在上方输入内容后按回车，创建今天的第一个任务",
+            self._empty_frame, text="在上方输入内容后按回车，创建今天的第一个任务",
             font=FONT_SMALL, bg=COL_BG, fg=COL_TXT_LOW
         ).pack(pady=(6, 0))
 
+    def _show_empty(self, msg="暂无任务"):
+        self._ensure_empty_frame()
+        if self._empty_msg_lbl is not None:
+            self._empty_msg_lbl.config(text=msg)
+        self._empty_frame.pack(fill='both', pady=46)
+
+    def _hide_empty(self):
+        if self._empty_frame is not None:
+            self._empty_frame.pack_forget()
+
+    def _apply_visibility(self):
+        """增量核心：按过滤/折叠重排卡片与分区显示。
+        widget全程不销毁，只pack/pack_forget，彻底消除重建闪烁。"""
+        today = datetime.now().strftime('%Y-%m-%d')
+        tasks = self.tasks.get(today, [])
+        f = self._filter
+        # 待办在前、已完成在后（与旧渲染顺序一致）
+        order = [i for i, t in enumerate(tasks) if not t.get('completed')] \
+              + [i for i, t in enumerate(tasks) if t.get('completed')]
+        done_count = sum(1 for t in tasks if t.get('completed'))
+
+        # 先全部脱离布局（不销毁）
+        for card in self._cards:
+            card['f'].pack_forget()
+        if self._done_header is not None:
+            self._done_header.pack_forget()
+        self._hide_empty()
+
+        if not tasks:
+            self._show_empty("暂无任务")
+            return
+
+        shown_any = False
+        if f != 'done':
+            for i in order:
+                t = tasks[i]
+                if t.get('completed'):
+                    continue
+                if f == 'all' or t.get('category') == f:
+                    self._cards[i]['f'].pack(fill='x', pady=(0, SP_MD))
+                    shown_any = True
+
+        if f == 'done':
+            for i in order:
+                t = tasks[i]
+                if t.get('completed'):
+                    self._cards[i]['f'].pack(fill='x', pady=(0, SP_MD))
+                    shown_any = True
+            if not shown_any:
+                self._show_empty("暂无已完成任务")
+        elif done_count:
+            # 常驻已完成折叠header
+            if self._done_header is None:
+                self._done_header = tk.Frame(self.task_container, bg=COL_BG)
+                self._done_fold_btn = tk.Button(
+                    self._done_header, text="▾ 已完成", font=FONT_SMALL, bg=COL_BG, fg=COL_TXT_LOW,
+                    activebackground=COL_BG, activeforeground=COL_TXT_MID,
+                    relief='flat', bd=0, cursor='hand2', takefocus=0,
+                    command=self._toggle_done_fold, anchor='w', padx=0
+                )
+                self._done_fold_btn.pack(side='left')
+                self._done_count_lbl = tk.Label(
+                    self._done_header, text="", font=FONT_SMALL, bg=COL_BG, fg=COL_TXT_LOW
+                )
+                self._done_count_lbl.pack(side='left', padx=(2, 0))
+            self._done_header.pack(fill='x', pady=(SP_MD, SP_XS))
+            self._done_fold_btn.config(text="▾ 已完成" if not self._done_folded else "▸ 已完成")
+            self._done_count_lbl.config(text=f"({done_count})")
+            if not self._done_folded:
+                for i in order:
+                    t = tasks[i]
+                    if t.get('completed') and (f == 'all' or t.get('category') == f):
+                        self._cards[i]['f'].pack(fill='x', pady=(0, SP_MD))
+
+        if not shown_any and not done_count:
+            self._show_empty("暂无任务")
+
+        # 更新滚动区
+        try:
+            self.canvas.configure(scrollregion=self.canvas.bbox('all'))
+        except Exception:
+            pass
+
+    def _refresh_counters(self):
+        """更新统计与过滤高亮（轻量，不碰列表）"""
+        today = datetime.now().strftime('%Y-%m-%d')
+        tasks = self.tasks.get(today, [])
+        done = sum(1 for t in tasks if t.get('completed'))
+        total = len(tasks)
+        self.count_label.config(text=f"{total} 项 · 完成 {done}" if total else "0 项")
+        for key, b in self._filter_btns.items():
+            if key == self._filter:
+                b.configure(bg=COL_ACCENT, fg='#14171c')
+            else:
+                b.configure(bg=COL_CARD, fg=COL_TXT_MID)
+
+    def _update_card_style(self, card):
+        """零重建样式更新：勾选/取消勾选只改颜色/删除线/勾选图形，不销毁重建任何widget"""
+        task = card['data']
+        completed = task.get('completed', False)
+        bg = COL_DONE_CARD if completed else COL_CARD
+        frame = card['f']
+        frame.configure(bg=bg, highlightbackground=COL_BORDER)
+        card['check'].configure(bg=bg)
+        self._draw_check(card['check'], completed, False, bg)
+        card['label'].configure(
+            fg=COL_TXT_LOW if completed else COL_TXT_HI,
+            font=('Microsoft YaHei UI', 10, 'overstrike' if completed else 'normal'),
+            bg=bg
+        )
+        text_block = card['label'].master
+        text_block.configure(bg=bg)
+        meta = text_block.winfo_children()[1] if len(text_block.winfo_children()) > 1 else None
+        if meta is not None:
+            meta.configure(bg=bg)
+            for w in meta.winfo_children():
+                try:
+                    w.configure(bg=bg)
+                except Exception:
+                    pass
+        btn_box = card['up'].master
+        btn_box.configure(bg=bg)
+        for key in ('up', 'down', 'edit', 'del'):
+            card[key].configure(bg=bg)
+        if task.get('category') is None:
+            card['cat_btn'].configure(bg=bg)
+
+    def _rebuild_one(self, index):
+        """单卡重建（编辑/分类/勾选后样式变更）：只销毁重建该卡片，其余widget不动"""
+        if 0 <= index < len(self._cards):
+            try:
+                self._cards[index]['f'].destroy()
+            except Exception:
+                pass
+            today = datetime.now().strftime('%Y-%m-%d')
+            tasks = self.tasks.get(today, [])
+            if index < len(tasks):
+                self._cards[index] = self._render_task(index, tasks[index])
+            else:
+                self._cards.pop(index)
+        try:
+            self.canvas.configure(scrollregion=self.canvas.bbox('all'))
+        except Exception:
+            pass
+
+    def _toggle_done_fold(self):
+        self._done_folded = not self._done_folded
+        self._apply_visibility()
+
     def _render_task(self, index, task, done=False):
-        """创建单个任务组件（分类色条 + 圆形复选框 + 悬停层次 + 排序按钮）"""
+        """创建单个任务组件（分类色条 + 圆形复选框 + 悬停层次 + 排序按钮）。
+        返回card dict供增量操作；按钮一律绑定card引用，动态查index，
+        删除/移动后引用依然准确，且本方法不pack（由_apply_visibility统一布局）。"""
         completed = task.get('completed', False) or done
         cat = task.get('category', None)
         card_bg = COL_DONE_CARD if completed else COL_CARD
@@ -696,7 +840,7 @@ class TaskWidget:
             self.task_container, bg=card_bg,
             highlightthickness=1, highlightbackground=COL_BORDER, bd=0
         )
-        task_frame.pack(fill='x', pady=3)
+        card = {'f': task_frame, 'data': task}
 
         # 分类色条（左侧 3px 竖条）
         bar_color = {'急': '#e06c66', '长期': '#4fbf8f', '不急': '#8a94a6'}.get(cat, COL_CARD_HV)
@@ -708,7 +852,7 @@ class TaskWidget:
                                  highlightthickness=0, bd=0)
         check_canvas.pack(side='left', padx=(10, 6), pady=8)
         self._draw_check(check_canvas, completed, False, card_bg)
-        check_canvas.bind('<Button-1>', lambda e: self.toggle_task(index))
+        check_canvas.bind('<Button-1>', lambda e: self.toggle_card(card))
 
         # 分类胶囊
         cat_text, cat_fg, cat_bg = CATEGORY_CONFIG.get(cat, CATEGORY_CONFIG[None])
@@ -717,7 +861,7 @@ class TaskWidget:
             activebackground=cat_bg, activeforeground=cat_fg,
             relief='flat', bd=0, cursor='hand2', takefocus=0, padx=6, pady=2
         )
-        cat_btn.config(command=lambda idx=index, w=cat_btn: self.show_category_menu(idx, w))
+        cat_btn.config(command=lambda w=cat_btn: self.show_category_menu(self._cards.index(card), w))
         cat_btn.pack(side='left', padx=(0, 6), pady=8)
 
         # 任务文本 + 创建时间小字
@@ -761,57 +905,55 @@ class TaskWidget:
             btn_box, text="↑", font=FONT_SYMBOL_SM, bg=card_bg, fg=COL_TXT_LOW,
             activebackground=COL_CARD_HV, activeforeground=COL_TXT_HI,
             relief='flat', bd=0, cursor='hand2', takefocus=0,
-            command=lambda: self.move_task(index, -1), width=2
+            command=lambda: self.move_card(card, -1), width=2
         )
         up_btn.pack(side='left', padx=1)
         down_btn = tk.Button(
             btn_box, text="↓", font=FONT_SYMBOL_SM, bg=card_bg, fg=COL_TXT_LOW,
             activebackground=COL_CARD_HV, activeforeground=COL_TXT_HI,
             relief='flat', bd=0, cursor='hand2', takefocus=0,
-            command=lambda: self.move_task(index, 1), width=2
+            command=lambda: self.move_card(card, 1), width=2
         )
         down_btn.pack(side='left', padx=1)
         edit_btn = tk.Button(
             btn_box, text="✎", font=FONT_SYMBOL_SM, bg=card_bg, fg=COL_TXT_LOW,
             activebackground=COL_CARD_HV, activeforeground=COL_TXT_HI,
             relief='flat', bd=0, cursor='hand2', takefocus=0,
-            command=lambda: self.edit_task(index), width=2
+            command=lambda: self.edit_task(self._cards.index(card)), width=2
         )
         edit_btn.pack(side='left', padx=1)
         del_btn = tk.Button(
             btn_box, text="✕", font=FONT_SYMBOL_SM, bg=card_bg, fg=COL_TXT_LOW,
             activebackground=COL_CARD_HV, activeforeground=COL_DANGER,
             relief='flat', bd=0, cursor='hand2', takefocus=0,
-            command=lambda: self.delete_task(index), width=2
+            command=lambda: self.delete_card(card), width=2
         )
         del_btn.pack(side='left', padx=1)
 
-        # 悬停效果
+        # 悬停效果（动态版：toggle后自动按最新completed状态生效，无需重建绑定）
         hover_widgets = [task_frame, task_label, text_block, meta, btn_box]
-        if not completed:
-            def on_enter(e):
-                task_frame.configure(bg=COL_CARD_HV, highlightbackground=COL_BORDER_HV)
-                for w in hover_widgets:
-                    w.configure(bg=COL_CARD_HV)
-                if cat is None:
-                    cat_btn.configure(bg=COL_CARD_HV)
-                check_canvas.configure(bg=COL_CARD_HV)
-                self._draw_check(check_canvas, False, True, COL_CARD_HV)
 
-            def on_leave(e):
-                task_frame.configure(bg=COL_CARD, highlightbackground=COL_BORDER)
-                for w in hover_widgets:
-                    w.configure(bg=COL_CARD)
-                if cat is None:
-                    cat_btn.configure(bg=COL_CARD)
-                check_canvas.configure(bg=COL_CARD)
-                self._draw_check(check_canvas, False, False, COL_CARD)
-        else:
-            def on_enter(e):
-                pass
+        def on_enter(e):
+            if card['data'].get('completed'):
+                return
+            task_frame.configure(bg=COL_CARD_HV, highlightbackground=COL_BORDER_HV)
+            for w in hover_widgets:
+                w.configure(bg=COL_CARD_HV)
+            if cat is None:
+                cat_btn.configure(bg=COL_CARD_HV)
+            check_canvas.configure(bg=COL_CARD_HV)
+            self._draw_check(check_canvas, False, True, COL_CARD_HV)
 
-            def on_leave(e):
-                pass
+        def on_leave(e):
+            if card['data'].get('completed'):
+                return
+            task_frame.configure(bg=COL_CARD, highlightbackground=COL_BORDER)
+            for w in hover_widgets:
+                w.configure(bg=COL_CARD)
+            if cat is None:
+                cat_btn.configure(bg=COL_CARD)
+            check_canvas.configure(bg=COL_CARD)
+            self._draw_check(check_canvas, False, False, COL_CARD)
 
         for w in hover_widgets:
             w.bind('<Enter>', on_enter)
@@ -819,15 +961,25 @@ class TaskWidget:
 
         # 右键菜单（任务行右键 = 完整操作）
         def on_right_click(e):
-            self.show_task_menu(index, e)
+            try:
+                self.show_task_menu(self._cards.index(card), e)
+            except ValueError:
+                pass
 
         # 双击任务行打开详情面板
         def on_double_click(e):
-            self.open_task_detail(index)
+            try:
+                self.open_task_detail(self._cards.index(card))
+            except ValueError:
+                pass
 
         for w in [task_frame, task_label, text_block]:
             w.bind('<Button-3>', on_right_click)
             w.bind('<Double-Button-1>', on_double_click)
+        # 子部件引用（供零重建样式更新使用）
+        card.update({'check': check_canvas, 'label': task_label, 'cat_btn': cat_btn,
+                     'up': up_btn, 'down': down_btn, 'edit': edit_btn, 'del': del_btn})
+        return card
 
     @staticmethod
     def _draw_check(canvas, completed, hover, bg):
@@ -1046,7 +1198,7 @@ class TaskWidget:
         today = datetime.now()
         self.title_lbl.config(
             text=f"今日 · {today.month}月{today.day}日 {self._weekday_cn(today.weekday())}")
-        self._refresh_task_list()
+        self._build_all_cards()
 
     def register_hotkey(self):
         """注册全局快捷键 Ctrl+Alt+Z"""
