@@ -220,13 +220,13 @@ class TaskWidget:
         quit_btn = tk.Button(
             win_ctrl, text="✕", font=FONT_SYMBOL_SM, bg=COL_PANEL, fg=COL_TXT_MID,
             activebackground='#3a1f1f', activeforeground='#e06c66',
-            relief='flat', bd=0, cursor='hand2', command=self.quit_app, width=2
+            relief='flat', bd=0, cursor='hand2', takefocus=0, command=self.quit_app, width=2
         )
         quit_btn.pack(side='right')
         hide_btn = tk.Button(
             win_ctrl, text="—", font=FONT_SYMBOL_SM, bg=COL_PANEL, fg=COL_TXT_MID,
             activebackground=COL_PANEL, activeforeground=COL_TXT_HI,
-            relief='flat', bd=0, cursor='hand2', command=self.hide_window, width=2
+            relief='flat', bd=0, cursor='hand2', takefocus=0, command=self.hide_window, width=2
         )
         hide_btn.pack(side='right')
 
@@ -255,7 +255,7 @@ class TaskWidget:
         add_btn = tk.Button(
             entry_frame, text="＋", font=FONT_SYMBOL, bg=COL_INPUT, fg=COL_ACCENT,
             activebackground=COL_INPUT, activeforeground=COL_ACCENT_HV,
-            relief='flat', bd=0, cursor='hand2', command=self.add_task, width=3
+            relief='flat', bd=0, cursor='hand2', takefocus=0, command=self.add_task, width=3
         )
         add_btn.pack(side='right', pady=2)
 
@@ -270,7 +270,7 @@ class TaskWidget:
             b = tk.Button(
                 cat_row, text=_t, font=FONT_SMALL, bg=_bg, fg=_fg,
                 activebackground=_bg, activeforeground=_fg,
-                relief='flat', bd=0, cursor='hand2', padx=8, pady=1
+                relief='flat', bd=0, cursor='hand2', takefocus=0, padx=8, pady=1
             )
             b.config(command=lambda cc=c: self._toggle_default_cat(cc))
             b.pack(side='left', padx=(SP_XS, 0))
@@ -288,7 +288,7 @@ class TaskWidget:
                 filter_bar, text=label, font=FONT_SMALL,
                 bg=COL_CARD, fg=COL_TXT_MID,
                 activebackground=COL_CARD_HV, activeforeground=COL_TXT_HI,
-                relief='flat', bd=0, cursor='hand2', padx=10, pady=2
+                relief='flat', bd=0, cursor='hand2', takefocus=0, padx=10, pady=2
             )
             b.config(command=lambda k=key: self.set_filter(k))
             b.pack(side='left', padx=(0, SP_XS))
@@ -298,7 +298,7 @@ class TaskWidget:
             filter_bar, text="↩ 撤销", font=FONT_SMALL,
             bg=COL_CARD, fg=COL_TXT_LOW,
             activebackground=COL_CARD_HV, activeforeground=COL_TXT_HI,
-            relief='flat', bd=0, cursor='hand2', command=self.undo_delete
+            relief='flat', bd=0, cursor='hand2', takefocus=0, command=self.undo_delete
         )
         undo_btn.pack(side='right')
         self._undo_btn = undo_btn
@@ -566,7 +566,18 @@ class TaskWidget:
     # ---------- 渲染 ----------
 
     def _refresh_task_list(self):
-        """刷新任务列表 + 过滤 + 已完成折叠 + 进度动画"""
+        """刷新任务列表（双缓冲：隐藏旧内容→重建→恢复显示，避免点击闪烁）"""
+        # 记录滚动位置
+        try:
+            self._yview_frac = self.canvas.yview()[0]
+        except Exception:
+            self._yview_frac = 0.0
+        # 隐藏旧内容（清空→重建过程用户不可见）
+        try:
+            self.canvas.itemconfig(self._canvas_window, state='hidden')
+        except Exception:
+            pass
+
         for widget in self.task_container.winfo_children():
             widget.destroy()
 
@@ -597,6 +608,7 @@ class TaskWidget:
         # 空状态
         if not tasks:
             self._render_empty()
+            self._restore_after_refresh()
             return
 
         # 待办区（保持原有 index 用于操作）
@@ -615,7 +627,7 @@ class TaskWidget:
                 header, text="▾ 已完成" if not self._done_folded else "▸ 已完成",
                 font=FONT_SMALL, bg=COL_BG, fg=COL_TXT_LOW,
                 activebackground=COL_BG, activeforeground=COL_TXT_MID,
-                relief='flat', bd=0, cursor='hand2',
+                relief='flat', bd=0, cursor='hand2', takefocus=0,
                 command=self._toggle_done_fold, anchor='w', padx=0
             )
             fold_btn.pack(side='left')
@@ -633,6 +645,26 @@ class TaskWidget:
 
         if f == 'done' and not done_indices:
             self._render_empty("暂无已完成任务")
+
+        # 重建完成：恢复显示 + 更新滚动区 + 保持滚动位置
+        self._restore_after_refresh()
+
+    def _restore_after_refresh(self):
+        """刷新完成后恢复显示与滚动位置（双缓冲收尾）"""
+        try:
+            self.canvas.itemconfig(self._canvas_window, state='normal')
+        except Exception:
+            pass
+        try:
+            self.canvas.configure(scrollregion=self.canvas.bbox('all'))
+        except Exception:
+            pass
+        frac = getattr(self, '_yview_frac', 0.0)
+        if frac:
+            try:
+                self.canvas.yview_moveto(frac)
+            except Exception:
+                pass
 
     def _toggle_done_fold(self):
         self._done_folded = not self._done_folded
@@ -683,7 +715,7 @@ class TaskWidget:
         cat_btn = tk.Button(
             task_frame, text=cat_text, font=FONT_SMALL, bg=cat_bg, fg=cat_fg,
             activebackground=cat_bg, activeforeground=cat_fg,
-            relief='flat', bd=0, cursor='hand2', padx=6, pady=2
+            relief='flat', bd=0, cursor='hand2', takefocus=0, padx=6, pady=2
         )
         cat_btn.config(command=lambda idx=index, w=cat_btn: self.show_category_menu(idx, w))
         cat_btn.pack(side='left', padx=(0, 6), pady=8)
@@ -728,28 +760,28 @@ class TaskWidget:
         up_btn = tk.Button(
             btn_box, text="↑", font=FONT_SYMBOL_SM, bg=card_bg, fg=COL_TXT_LOW,
             activebackground=COL_CARD_HV, activeforeground=COL_TXT_HI,
-            relief='flat', bd=0, cursor='hand2',
+            relief='flat', bd=0, cursor='hand2', takefocus=0,
             command=lambda: self.move_task(index, -1), width=2
         )
         up_btn.pack(side='left', padx=1)
         down_btn = tk.Button(
             btn_box, text="↓", font=FONT_SYMBOL_SM, bg=card_bg, fg=COL_TXT_LOW,
             activebackground=COL_CARD_HV, activeforeground=COL_TXT_HI,
-            relief='flat', bd=0, cursor='hand2',
+            relief='flat', bd=0, cursor='hand2', takefocus=0,
             command=lambda: self.move_task(index, 1), width=2
         )
         down_btn.pack(side='left', padx=1)
         edit_btn = tk.Button(
             btn_box, text="✎", font=FONT_SYMBOL_SM, bg=card_bg, fg=COL_TXT_LOW,
             activebackground=COL_CARD_HV, activeforeground=COL_TXT_HI,
-            relief='flat', bd=0, cursor='hand2',
+            relief='flat', bd=0, cursor='hand2', takefocus=0,
             command=lambda: self.edit_task(index), width=2
         )
         edit_btn.pack(side='left', padx=1)
         del_btn = tk.Button(
             btn_box, text="✕", font=FONT_SYMBOL_SM, bg=card_bg, fg=COL_TXT_LOW,
             activebackground=COL_CARD_HV, activeforeground=COL_DANGER,
-            relief='flat', bd=0, cursor='hand2',
+            relief='flat', bd=0, cursor='hand2', takefocus=0,
             command=lambda: self.delete_task(index), width=2
         )
         del_btn.pack(side='left', padx=1)
