@@ -141,6 +141,10 @@ class TaskWidget:
         self.base_dir = Path(__file__).resolve().parent
         self.data_file = self.base_dir / 'task_widget.json'
         self.tasks = self.load_tasks()
+        self.schedule = self._load_schedule()   # 今日安排数据
+        self._schedule_win = None               # 今日安排面板引用
+        self.timeline = self._load_timeline()   # 每日时间线数据
+        self._timeline_win = None               # 每日时间线面板引用
 
         # 视图状态
         self._filter = 'all'        # all / 急 / 长期 / 不急 / done
@@ -214,6 +218,30 @@ class TaskWidget:
             font=FONT_TITLE, bg=COL_PANEL, fg=COL_TXT_HI
         )
         self.title_lbl.pack(side='left', padx=(SP_LG, 0), pady=8)
+
+        # 今日安排按钮（紧贴标题文字）
+        sched_btn = tk.Button(
+            title_bar, text="📋", font=FONT_SYMBOL_SM,
+            bg=COL_PANEL, fg=COL_TXT_MID,
+            activebackground=COL_PANEL, activeforeground=COL_ACCENT,
+            relief='flat', bd=0, cursor='hand2', takefocus=0,
+            command=self.open_schedule_panel
+        )
+        sched_btn.pack(side='left', padx=(SP_XS, 0), pady=8)
+        sched_btn.bind('<Enter>', lambda e: sched_btn.configure(fg=COL_ACCENT))
+        sched_btn.bind('<Leave>', lambda e: sched_btn.configure(fg=COL_TXT_MID))
+
+        # 每日时间线按钮（紧贴今日安排按钮）
+        tl_btn = tk.Button(
+            title_bar, text="⏱", font=FONT_SYMBOL_SM,
+            bg=COL_PANEL, fg=COL_TXT_MID,
+            activebackground=COL_PANEL, activeforeground=COL_ACCENT,
+            relief='flat', bd=0, cursor='hand2', takefocus=0,
+            command=self.open_timeline_panel
+        )
+        tl_btn.pack(side='left', padx=(SP_XS, 0), pady=8)
+        tl_btn.bind('<Enter>', lambda e: tl_btn.configure(fg=COL_ACCENT))
+        tl_btn.bind('<Leave>', lambda e: tl_btn.configure(fg=COL_TXT_MID))
 
         self.count_label = tk.Label(
             title_bar, text="", font=FONT_SMALL,
@@ -1178,6 +1206,16 @@ class TaskWidget:
 
     def hide_window(self):
         self.root.withdraw()
+        if self._schedule_win is not None:
+            try:
+                self._schedule_win.withdraw()
+            except tk.TclError:
+                self._schedule_win = None
+        if self._timeline_win is not None:
+            try:
+                self._timeline_win.withdraw()
+            except tk.TclError:
+                self._timeline_win = None
 
     def quit_app(self):
         """真正退出应用：清理全局热键后销毁窗口"""
@@ -1199,6 +1237,455 @@ class TaskWidget:
         self.title_lbl.config(
             text=f"今日 · {today.month}月{today.day}日 {self._weekday_cn(today.weekday())}")
         self._build_all_cards()
+        # 同步恢复今日安排面板
+        if self._schedule_win is not None:
+            try:
+                self._schedule_win.deiconify()
+                self._schedule_win.lift()
+            except tk.TclError:
+                self._schedule_win = None
+        # 同步恢复每日时间线面板
+        if self._timeline_win is not None:
+            try:
+                self._timeline_win.deiconify()
+                self._timeline_win.lift()
+            except tk.TclError:
+                self._timeline_win = None
+
+    # ---------- 今日安排 ----------
+
+    def _load_schedule(self):
+        """从 task_widget.json 的 _schedule 键加载今日安排（自由文本）"""
+        if not self.data_file.exists():
+            return ''
+        try:
+            with open(self.data_file, 'r', encoding='utf-8') as f:
+                raw = json.load(f)
+            today = datetime.now().strftime('%Y-%m-%d')
+            return raw.get('_schedule', {}).get(today, '')
+        except Exception:
+            return ''
+
+    def _save_schedule(self, text: str):
+        """把自由文本写回 task_widget.json 的 _schedule 键（不影响任务数据）"""
+        try:
+            raw = {}
+            if self.data_file.exists():
+                with open(self.data_file, 'r', encoding='utf-8') as f:
+                    raw = json.load(f)
+            today = datetime.now().strftime('%Y-%m-%d')
+            if '_schedule' not in raw:
+                raw['_schedule'] = {}
+            raw['_schedule'][today] = text
+            with open(self.data_file, 'w', encoding='utf-8') as f:
+                json.dump(raw, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"保存今日安排失败: {e}")
+
+    def open_schedule_panel(self):
+        """打开/聚焦/隐藏今日安排面板（自由文本编辑器）"""
+        if self._schedule_win is not None:
+            try:
+                if self._schedule_win.state() == 'normal' and self._schedule_win.winfo_viewable():
+                    # 已显示 → 隐藏
+                    self._schedule_win.withdraw()
+                    return
+                # 已隐藏 → 重新显示
+                self._schedule_win.deiconify()
+                self._schedule_win.lift()
+                self._schedule_win.focus_force()
+                return
+            except tk.TclError:
+                self._schedule_win = None
+
+        win = tk.Toplevel(self.root)
+        self._schedule_win = win
+        win.title("今日安排")
+        win.configure(bg=COL_BG)
+        win.overrideredirect(True)
+        win.attributes('-topmost', True)
+
+        # 窗口尺寸 & 位置（主窗口左侧）
+        W, H = 340, 500
+        rx = self.root.winfo_x()
+        ry = self.root.winfo_y()
+        win.geometry(f"{W}x{H}+{max(0, rx - W - 8)}+{ry}")
+
+        # ── 标题栏 ──
+        title_bar = tk.Frame(win, bg=COL_PANEL, height=40)
+        title_bar.pack(fill='x')
+        title_bar.pack_propagate(False)
+
+        title_lbl = tk.Label(
+            title_bar, text="📋 今日安排",
+            font=FONT_TITLE, bg=COL_PANEL, fg=COL_TXT_HI
+        )
+        title_lbl.pack(side='left', padx=SP_LG, pady=6)
+
+        # 字数统计
+        char_lbl = tk.Label(
+            title_bar, text="", font=FONT_SMALL,
+            bg=COL_PANEL, fg=COL_TXT_LOW
+        )
+        char_lbl.pack(side='left', padx=(0, SP_SM), pady=6)
+
+        close_btn = tk.Button(
+            title_bar, text="✕", font=FONT_SYMBOL_SM,
+            bg=COL_PANEL, fg=COL_TXT_MID,
+            activebackground='#3a1f1f', activeforeground=COL_DANGER,
+            relief='flat', bd=0, cursor='hand2', takefocus=0,
+            command=win.destroy
+        )
+        close_btn.pack(side='right', padx=SP_SM, pady=6)
+        close_btn.bind('<Enter>', lambda e: close_btn.configure(fg=COL_DANGER))
+        close_btn.bind('<Leave>', lambda e: close_btn.configure(fg=COL_TXT_MID))
+
+        # 拖拽
+        _drag = {'x': 0, 'y': 0}
+        def _start(e): _drag['x'], _drag['y'] = e.x_root, e.y_root
+        def _move(e):
+            dx, dy = e.x_root - _drag['x'], e.y_root - _drag['y']
+            _drag['x'], _drag['y'] = e.x_root, e.y_root
+            win.geometry(f"+{win.winfo_x()+dx}+{win.winfo_y()+dy}")
+        for w in (title_bar, title_lbl):
+            w.bind('<Button-1>', _start)
+            w.bind('<B1-Motion>', _move)
+
+        # ── 文本编辑区 ──
+        text_frame = tk.Frame(win, bg=COL_INPUT, highlightthickness=1,
+                              highlightbackground=COL_BORDER)
+        text_frame.pack(fill='both', expand=True, padx=SP_LG, pady=(SP_SM, 0))
+
+        scrollbar = tk.Scrollbar(text_frame, orient='vertical',
+                                 troughcolor=COL_SCROLL_BG, width=6)
+        scrollbar.pack(side='right', fill='y')
+
+        text_box = tk.Text(
+            text_frame,
+            font=FONT_UI, bg=COL_INPUT, fg=COL_TXT_HI,
+            insertbackground=COL_ACCENT,
+            selectbackground=COL_ACCENT, selectforeground='#ffffff',
+            relief='flat', bd=8, wrap='word',
+            yscrollcommand=scrollbar.set,
+            undo=True  # Ctrl+Z 撤销
+        )
+        text_box.pack(side='left', fill='both', expand=True)
+        scrollbar.config(command=text_box.yview)
+
+        # 载入已有内容
+        saved = self._load_schedule()
+        if saved:
+            text_box.insert('1.0', saved)
+        text_box.focus_set()
+        # 拦截 Ctrl+Alt+Z：阻止 tk 把它当 undo 处理（OS层已有全局热键处理）
+        text_box.bind('<Control-Alt-z>', lambda e: 'break')
+        text_box.bind('<Control-Alt-Z>', lambda e: 'break')
+
+        # ── 状态栏 ──
+        status_bar = tk.Frame(win, bg=COL_PANEL, height=28)
+        status_bar.pack(fill='x', padx=0, pady=(2, 0))
+        status_bar.pack_propagate(False)
+
+        status_lbl = tk.Label(
+            status_bar, text="Ctrl+Z 撤销  |  自动保存",
+            font=FONT_SMALL, bg=COL_PANEL, fg=COL_TXT_LOW
+        )
+        status_lbl.pack(side='left', padx=SP_LG)
+
+        save_lbl = tk.Label(
+            status_bar, text="", font=FONT_SMALL,
+            bg=COL_PANEL, fg=COL_TXT_LOW
+        )
+        save_lbl.pack(side='right', padx=SP_LG)
+
+        # ── 自动保存（停止输入 800ms 后触发）──
+        _save_timer = [None]
+
+        def _auto_save(event=None):
+            if _save_timer[0]:
+                win.after_cancel(_save_timer[0])
+            _save_timer[0] = win.after(800, _do_save)
+
+        def _do_save():
+            content = text_box.get('1.0', 'end-1c')
+            self._save_schedule(content)
+            # 更新字数
+            chars = len(content.replace('\n', ''))
+            char_lbl.config(text=f"{chars}字" if chars else "")
+            save_lbl.config(text="已保存 ✓", fg=COL_TXT_LOW)
+            win.after(1500, lambda: save_lbl.config(text=""))
+
+        text_box.bind('<KeyRelease>', _auto_save)
+
+        # 初始字数
+        init_chars = len(saved.replace('\n', '')) if saved else 0
+        if init_chars:
+            char_lbl.config(text=f"{init_chars}字")
+
+        # 关闭时保存并清理引用
+        def _on_close():
+            _do_save()
+            win.destroy()
+
+        win.protocol('WM_DELETE_WINDOW', _on_close)
+        win.bind('<Destroy>', lambda e: setattr(self, '_schedule_win', None)
+                 if e.widget is win else None)
+
+    # ---------- 每日时间线 ----------
+
+    def _load_timeline(self):
+        """从 task_widget.json 的 _timeline 键加载今日时间线（按起始时间排序）"""
+        if not self.data_file.exists():
+            return []
+        try:
+            with open(self.data_file, 'r', encoding='utf-8') as f:
+                raw = json.load(f)
+            today = datetime.now().strftime('%Y-%m-%d')
+            items = raw.get('_timeline', {}).get(today, [])
+            return sorted(items, key=lambda x: (x.get('sh', 0), x.get('sm', 0)))
+        except Exception:
+            return []
+
+    def _save_timeline(self, items):
+        """把时间线写回 task_widget.json 的 _timeline 键（不影响任务数据）"""
+        try:
+            raw = {}
+            if self.data_file.exists():
+                with open(self.data_file, 'r', encoding='utf-8') as f:
+                    raw = json.load(f)
+            today = datetime.now().strftime('%Y-%m-%d')
+            if '_timeline' not in raw:
+                raw['_timeline'] = {}
+            raw['_timeline'][today] = sorted(
+                items, key=lambda x: (x.get('sh', 0), x.get('sm', 0)))
+            with open(self.data_file, 'w', encoding='utf-8') as f:
+                json.dump(raw, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"保存每日时间线失败: {e}")
+
+    def open_timeline_panel(self):
+        """打开/聚焦/隐藏每日时间线面板"""
+        if self._timeline_win is not None:
+            try:
+                if self._timeline_win.state() == 'normal' and self._timeline_win.winfo_viewable():
+                    # 已显示 → 隐藏
+                    self._timeline_win.withdraw()
+                    return
+                # 已隐藏 → 重新显示
+                self._timeline_win.deiconify()
+                self._timeline_win.lift()
+                self._timeline_win.focus_force()
+                return
+            except tk.TclError:
+                self._timeline_win = None
+
+        win = tk.Toplevel(self.root)
+        self._timeline_win = win
+        win.title("每日时间线")
+        win.configure(bg=COL_BG)
+        win.overrideredirect(True)
+        win.attributes('-topmost', True)
+
+        # 窗口尺寸 & 位置（今日安排左侧）
+        W, H = 340, 500
+        rx = self.root.winfo_x()
+        ry = self.root.winfo_y()
+        win.geometry(f"{W}x{H}+{max(0, rx - W - 8)}+{ry}")
+
+        # ── 标题栏 ──
+        title_bar = tk.Frame(win, bg=COL_PANEL, height=40)
+        title_bar.pack(fill='x')
+        title_bar.pack_propagate(False)
+
+        title_lbl = tk.Label(
+            title_bar, text="⏱ 每日时间线",
+            font=FONT_TITLE, bg=COL_PANEL, fg=COL_TXT_HI
+        )
+        title_lbl.pack(side='left', padx=SP_LG, pady=6)
+
+        close_btn = tk.Button(
+            title_bar, text="✕", font=FONT_SYMBOL_SM,
+            bg=COL_PANEL, fg=COL_TXT_MID,
+            activebackground='#3a1f1f', activeforeground=COL_DANGER,
+            relief='flat', bd=0, cursor='hand2', takefocus=0,
+            command=win.destroy
+        )
+        close_btn.pack(side='right', padx=SP_SM, pady=6)
+        close_btn.bind('<Enter>', lambda e: close_btn.configure(fg=COL_DANGER))
+        close_btn.bind('<Leave>', lambda e: close_btn.configure(fg=COL_TXT_MID))
+
+        # 拖拽
+        _drag = {'x': 0, 'y': 0}
+        def _start(e): _drag['x'], _drag['y'] = e.x_root, e.y_root
+        def _move(e):
+            dx, dy = e.x_root - _drag['x'], e.y_root - _drag['y']
+            _drag['x'], _drag['y'] = e.x_root, e.y_root
+            win.geometry(f"+{win.winfo_x()+dx}+{win.winfo_y()+dy}")
+        for w in (title_bar, title_lbl):
+            w.bind('<Button-1>', _start)
+            w.bind('<B1-Motion>', _move)
+
+        # ── 输入区：起始时 : 起始分 - 终止时 : 终止分 ，任务 ──
+        input_frame = tk.Frame(win, bg=COL_PANEL, highlightthickness=1,
+                               highlightbackground=COL_BORDER)
+        input_frame.pack(fill='x', padx=SP_LG, pady=(SP_SM, 0))
+
+        row1 = tk.Frame(input_frame, bg=COL_PANEL)
+        row1.pack(fill='x', pady=(SP_SM, 0), padx=SP_SM)
+
+        sh_var, sm_var = tk.StringVar(), tk.StringVar()
+        eh_var, em_var = tk.StringVar(), tk.StringVar()
+
+        def _mk_entry(var):
+            e = tk.Entry(row1, textvariable=var, width=3, justify='center',
+                         font=FONT_UI, bg=COL_INPUT, fg=COL_TXT_HI,
+                         insertbackground=COL_ACCENT, relief='flat')
+            e.pack(side='left', ipady=3, padx=1)
+            return e
+
+        _mk_entry(sh_var)
+        tk.Label(row1, text=":", font=FONT_UI, bg=COL_PANEL, fg=COL_TXT_MID).pack(side='left')
+        _mk_entry(sm_var)
+        tk.Label(row1, text="  —  ", font=FONT_UI, bg=COL_PANEL, fg=COL_TXT_MID).pack(side='left')
+        _mk_entry(eh_var)
+        tk.Label(row1, text=":", font=FONT_UI, bg=COL_PANEL, fg=COL_TXT_MID).pack(side='left')
+        _mk_entry(em_var)
+
+        row2 = tk.Frame(input_frame, bg=COL_PANEL)
+        row2.pack(fill='x', pady=(SP_XS, SP_SM), padx=SP_SM)
+
+        task_var = tk.StringVar()
+        task_entry = tk.Entry(row2, textvariable=task_var,
+                              font=FONT_UI, bg=COL_INPUT, fg=COL_TXT_HI,
+                              insertbackground=COL_ACCENT, relief='flat')
+        task_entry.pack(side='left', fill='x', expand=True, ipady=3, padx=(0, SP_SM))
+
+        add_btn = tk.Button(
+            row2, text="＋ 添加", font=FONT_SMALL,
+            bg=COL_ACCENT, fg='#ffffff',
+            activebackground=COL_ACCENT_HV, activeforeground='#ffffff',
+            relief='flat', bd=0, cursor='hand2', takefocus=0
+        )
+        add_btn.pack(side='right')
+
+        # ── 列表区（Canvas 滚动）──
+        list_frame = tk.Frame(win, bg=COL_BG)
+        list_frame.pack(fill='both', expand=True, padx=SP_LG, pady=(SP_SM, 0))
+
+        canvas = tk.Canvas(list_frame, bg=COL_BG, highlightthickness=0)
+        scrollbar = tk.Scrollbar(list_frame, orient='vertical',
+                                 troughcolor=COL_SCROLL_BG, width=6)
+        scrollbar.pack(side='right', fill='y')
+        canvas.pack(side='left', fill='both', expand=True)
+
+        container = tk.Frame(canvas, bg=COL_BG)
+        canvas_win = canvas.create_window((0, 0), window=container, anchor='nw')
+
+        def _on_resize(e):
+            canvas.itemconfig(canvas_win, width=e.width)
+        canvas.bind('<Configure>', _on_resize)
+
+        def _refresh_scroll():
+            container.update_idletasks()
+            canvas.configure(scrollregion=canvas.bbox('all'))
+
+        # 载入今日数据（跨日自动取新的一天）
+        items = self._load_timeline()
+
+        def _render():
+            for w in container.winfo_children():
+                w.destroy()
+            if not items:
+                tk.Label(container, text="今日还没有时间线，添加一条吧",
+                         font=FONT_SMALL, bg=COL_BG, fg=COL_TXT_LOW
+                         ).pack(pady=30)
+            for i, it in enumerate(items):
+                row = tk.Frame(container, bg=COL_CARD, highlightthickness=1,
+                               highlightbackground=COL_BORDER)
+                row.pack(fill='x', pady=3)
+
+                t = it.get('task', '')
+                t_str = f"{it.get('sh',0):02d}:{it.get('sm',0):02d} - " \
+                        f"{it.get('eh',0):02d}:{it.get('em',0):02d}，{t}"
+                tk.Label(row, text=t_str, font=FONT_UI, bg=COL_CARD, fg=COL_TXT_HI,
+                         anchor='w', justify='left'
+                         ).pack(side='left', fill='x', expand=True, padx=SP_SM, pady=6)
+
+                del_btn = tk.Button(
+                    row, text="✕", font=FONT_SYMBOL_SM,
+                    bg=COL_CARD, fg=COL_TXT_LOW,
+                    activebackground=COL_CARD, activeforeground=COL_DANGER,
+                    relief='flat', bd=0, cursor='hand2', takefocus=0,
+                    command=lambda idx=i: _delete(idx)
+                )
+                del_btn.pack(side='right', padx=(0, SP_SM))
+                del_btn.bind('<Enter>', lambda e, b=del_btn: b.configure(fg=COL_DANGER))
+                del_btn.bind('<Leave>', lambda e, b=del_btn: b.configure(fg=COL_TXT_LOW))
+
+        def _parse_int(s):
+            s = s.strip()
+            if not s.isdigit():
+                return None
+            return int(s)
+
+        def _add():
+            sh, sm = _parse_int(sh_var.get()), _parse_int(sm_var.get())
+            eh, em = _parse_int(eh_var.get()), _parse_int(em_var.get())
+            task = task_var.get().strip()
+            if None in (sh, sm, eh, em):
+                status_lbl.config(text="时间请填 0-23 时 / 0-59 分", fg=COL_DANGER)
+                return
+            if not (0 <= sh <= 23 and 0 <= sm <= 59 and 0 <= eh <= 23 and 0 <= em <= 59):
+                status_lbl.config(text="时间范围：时 0-23，分 0-59", fg=COL_DANGER)
+                return
+            if (sh, sm) > (eh, em):
+                status_lbl.config(text="终止时间需晚于起始时间", fg=COL_DANGER)
+                return
+            if not task:
+                status_lbl.config(text="任务内容不能为空", fg=COL_DANGER)
+                return
+            items.append({'sh': sh, 'sm': sm, 'eh': eh, 'em': em, 'task': task})
+            items.sort(key=lambda x: (x['sh'], x['sm']))
+            for v in (sh_var, sm_var, eh_var, em_var, task_var):
+                v.set('')
+            task_entry.focus_set()
+            _save()
+            _render()
+            _refresh_scroll()
+            status_lbl.config(text=f"已添加：{sh:02d}:{sm:02d} - {eh:02d}:{em:02d}，{task}",
+                              fg=COL_SUCCESS)
+
+        def _delete(idx):
+            items.pop(idx)
+            _save()
+            _render()
+            _refresh_scroll()
+
+        def _save():
+            self._save_timeline(items)
+            self.timeline = items
+
+        add_btn.configure(command=_add)
+        task_entry.bind('<Return>', lambda e: _add())
+
+        # ── 状态栏 ──
+        status_bar = tk.Frame(win, bg=COL_PANEL, height=28)
+        status_bar.pack(fill='x', pady=(2, 0))
+        status_bar.pack_propagate(False)
+
+        status_lbl = tk.Label(
+            status_bar, text="按起始时间自动排序 · 每日刷新",
+            font=FONT_SMALL, bg=COL_PANEL, fg=COL_TXT_LOW
+        )
+        status_lbl.pack(side='left', padx=SP_LG)
+
+        _render()
+        _refresh_scroll()
+
+        # 关闭时清理引用
+        win.protocol('WM_DELETE_WINDOW', win.destroy)
+        win.bind('<Destroy>', lambda e: setattr(self, '_timeline_win', None)
+                 if e.widget is win else None)
 
     def register_hotkey(self):
         """注册全局快捷键 Ctrl+Alt+Z"""

@@ -1,6 +1,9 @@
 # 个人数据（不提交）
 task_widget.json
 
+# 根目录冗余图标（真实图标在 assets/icon.ico）
+/icon.ico
+
 # 备份与缓存
 __pycache__/
 *.pyc
