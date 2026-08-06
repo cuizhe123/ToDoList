@@ -413,6 +413,8 @@ class TaskWidget:
         self._filter = key
         self._apply_visibility()
         self._refresh_counters()
+        # 切换过滤时复位滚动到顶部，避免因之前滚动偏移导致内容不可见
+        self.canvas.yview_moveto(0)
 
     def _toggle_default_cat(self, cat):
         """预设快捷分类：再次点击取消"""
