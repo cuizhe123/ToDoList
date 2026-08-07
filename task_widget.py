@@ -725,9 +725,16 @@ class TaskWidget:
         today = datetime.now().strftime('%Y-%m-%d')
         tasks = self.tasks.get(today, [])
         f = self._filter
-        # 待办在前、已完成在后（与旧渲染顺序一致）
-        order = [i for i, t in enumerate(tasks) if not t.get('completed')] \
-              + [i for i, t in enumerate(tasks) if t.get('completed')]
+        # 分类排序权重：无标签→长期→急→不急（同分类内保持原顺序，stable sort）
+        _cat_w = {None: 0, '长期': 1, '急': 2, '不急': 3}
+        def _cat_sort_key(idx):
+            c = tasks[idx].get('category')
+            return _cat_w.get(c if c else None, 4)
+        # 待办在前、已完成在后，各自内部按分类排序
+        order = sorted((i for i, t in enumerate(tasks) if not t.get('completed')),
+                       key=_cat_sort_key) \
+              + sorted((i for i, t in enumerate(tasks) if t.get('completed')),
+                       key=_cat_sort_key)
         done_count = sum(1 for t in tasks if t.get('completed'))
 
         # 先全部脱离布局（不销毁）
