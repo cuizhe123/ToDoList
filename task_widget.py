@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 今日 list — 桌面任务挂件 v2
-快捷键：Ctrl+Alt+Z 呼出/隐藏
+快捷键：F8 呼出/隐藏
 功能：添加任务、分类标签（急/不急/长期）、未完成任务自动顺延到次日、
       长期任务次日重置、手动排序、分类过滤、已完成折叠、撤销删除、
       完成率动画进度条、窗口拖拽移动
@@ -1264,28 +1264,31 @@ class TaskWidget:
     # ---------- 今日安排 ----------
 
     def _load_schedule(self):
-        """从 task_widget.json 的 _schedule 键加载今日安排（自由文本）"""
+        """从 task_widget.json 的 _schedule_text 键加载今日安排（自由文本，不按日期区分，永久保留）"""
         if not self.data_file.exists():
             return ''
         try:
             with open(self.data_file, 'r', encoding='utf-8') as f:
                 raw = json.load(f)
-            today = datetime.now().strftime('%Y-%m-%d')
-            return raw.get('_schedule', {}).get(today, '')
+            # 兼容旧格式：优先读固定 key，否则尝试读旧版按日期存储的最新内容
+            if '_schedule_text' in raw:
+                return raw['_schedule_text']
+            old = raw.get('_schedule', {})
+            if old:
+                latest = sorted(old.keys())[-1]
+                return old[latest]
+            return ''
         except Exception:
             return ''
 
     def _save_schedule(self, text: str):
-        """把自由文本写回 task_widget.json 的 _schedule 键（不影响任务数据）"""
+        """把自由文本写回 task_widget.json 的 _schedule_text 键（不影响任务数据，永久保留）"""
         try:
             raw = {}
             if self.data_file.exists():
                 with open(self.data_file, 'r', encoding='utf-8') as f:
                     raw = json.load(f)
-            today = datetime.now().strftime('%Y-%m-%d')
-            if '_schedule' not in raw:
-                raw['_schedule'] = {}
-            raw['_schedule'][today] = text
+            raw['_schedule_text'] = text
             with open(self.data_file, 'w', encoding='utf-8') as f:
                 json.dump(raw, f, ensure_ascii=False, indent=2)
         except Exception as e:
@@ -1697,12 +1700,12 @@ class TaskWidget:
                  if e.widget is win else None)
 
     def register_hotkey(self):
-        """注册全局快捷键 Ctrl+Alt+Z"""
+        """注册全局快捷键 F8"""
         def hotkey_handler():
             self.root.after(0, self.toggle_window)
 
         try:
-            keyboard.add_hotkey('ctrl+alt+z', hotkey_handler)
+            keyboard.add_hotkey('f8', hotkey_handler)
         except Exception as e:
             print(f"快捷键注册失败: {e}")
 
